@@ -14,34 +14,34 @@ import (
 // прекращает работу по сигналу отмены контекста ctx
 // логирует своё завершение (для этого необходим id)
 func producer(ctx context.Context, n, id int, ch chan<- int) {
-    // создаём новый псевдослучайный генератор чисел 
+	// создаём новый псевдослучайный генератор чисел
 	src := rand.NewSource(time.Now().Unix())
-    rnd := rand.New(src)
-    for {
-        select {
+	rnd := rand.New(src)
+	for {
+		select {
 		// слушаем контекст
-        case <-ctx.Done(): // в случае сигнала отмены
-            {
+		case <-ctx.Done(): // в случае сигнала отмены
+			{
 				// логируем завершение работы продюсера
-                fmt.Printf("[Producer #%d] exit\n", id)
+				fmt.Printf("[Producer #%d] exit\n", id)
 				// закрываем канал
-                close(ch)
+				close(ch)
 				// завершаем работу
-                return
-            }
-        default: // в противном случае пушим случайное число в канал
-            ch <- rnd.Intn(n)
-        }
+				return
+			}
+		default: // в противном случае пушим случайное число в канал
+			ch <- rnd.Intn(n)
+		}
 
-    }
+	}
 }
 
 // слушает каналы из chans, записываем limits уникальных чисел в out
-func consumer(cancel context.CancelFunc, limits int, chans []chan int, out chan int)  {
+func consumer(cancel context.CancelFunc, limits int, chans []chan int, out chan int) {
 	// отображение: int -> struct{}
 	// позволяет использовать его как множество
-    unique := make(map[int]struct{})
-    for {
+	unique := make(map[int]struct{})
+	for {
 		// флаг, отвечающий на вопрос: работают ли producer-ы
 		producersWorks := false
 		// пробегаемся по каналам
@@ -59,6 +59,7 @@ func consumer(cancel context.CancelFunc, limits int, chans []chan int, out chan 
 					unique[num] = struct{}{}
 					// запись num в канал
 					out <- num
+					println(num)
 				}
 			}
 		}
@@ -84,51 +85,57 @@ func consumer(cancel context.CancelFunc, limits int, chans []chan int, out chan 
 			// завершаем работу
 			return
 		}
-    }
+	}
 }
 
 // экспортируемая функция для взаимодействия с модулем
 // запускает threads producer-ов и одного consumer-а, пушит в out уникальные числа
 func Handler(mainCtx context.Context, limits, threads int, out chan int) {
 	// контекст для завершения producer-ов
-    ctx, cancel := context.WithCancel(context.Background())
-    // WaitGroup, отвечающая за выполнение горутин
+	ctx, cancel := context.WithCancel(context.Background())
+	// WaitGroup, отвечающая за выполнение горутин
 	var wg sync.WaitGroup
 	// будет выполнено threads producer-ов и один consumer
-    wg.Add(threads + 1)
+	wg.Add(threads + 1)
 	// запоминаем каналы, передаваемые producer-ам
-    chans := []chan int{}
+	chans := []chan int{}
 	// запуск threads producer-ов
-    for i := 0; i < threads; i++ {
-		// создаём новый канал для текущего producer-а 
-        curr := make(chan int)
+	for i := 0; i < threads; i++ {
+		// создаём новый канал для текущего producer-а
+		curr := make(chan int)
 		// кладём его в chans
-        chans = append(chans, curr)
+		chans = append(chans, curr)
 		// запуск producer-а, с передачей id для логирования
-        go func(i int) {
+		go func(i int) {
 			// кладём в defer stack выполнение текущего producer-а
-            defer wg.Done()
-            producer(ctx, limits, i, curr)
-        }(i)
-    }
+			defer wg.Done()
+			producer(ctx, limits, i, curr)
+		}(i)
+	}
 	// запуск consumer-а
 	consumerWorks := true
-    go func() {
-        defer wg.Done()
-        consumer(cancel, limits, chans, out)
+	go func() {
+		defer wg.Done()
+		consumer(cancel, limits, chans, out)
 		consumerWorks = false
-    }()
+	}()
 	// запускаем прослушку аварийного контекста
 	for {
 		select {
-			case <-mainCtx.Done(): {
+		case <-mainCtx.Done():
+			{
 				// логируем сигнал отмены контекста
 				fmt.Println("mainContext cancel signal")
 				cancel()
-				fmt.Println("[Handler] exit")
+				// ожидаем завершения работы consumer-а
+				for consumerWorks {
+					_ = <-out
+				}
+				fmt.Print("[Handler] exit")
 				return
 			}
-			default:{
+		default:
+			{
 				if !consumerWorks {
 					fmt.Print("[Handler] exit")
 					return
@@ -136,6 +143,4 @@ func Handler(mainCtx context.Context, limits, threads int, out chan int) {
 			}
 		}
 	}
-	
 }
-
