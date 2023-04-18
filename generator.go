@@ -36,11 +36,6 @@ func producer(ctx context.Context, n, id int, ch chan<- int) {
     }
 }
 
-// вызывает функцию отмены контекста, чистит каналы и устанавливает флаг в false
-func finish(cnl context.CancelFunc, chans []chan int, flag *bool) {
-	
-}
-
 // слушает каналы из chans, записываем limits уникальных чисел в out
 func consumer(cancel context.CancelFunc, limits int, chans []chan int, out chan int)  {
 	// отображение: int -> struct{}
@@ -49,40 +44,36 @@ func consumer(cancel context.CancelFunc, limits int, chans []chan int, out chan 
     for {
 		// флаг, отвечающий на вопрос: работают ли producer-ы
 		producersWorks := false
-		select {
-			default: {
-				// пробегаемся по каналам
-				for _, ch := range chans {
-					// слушаем текущий канал ch
-					num, ok := <-ch
-					// если канал открыт
-					if ok {
-						// значит producer-ы всё ещё работают
-						producersWorks = true
-						// ok - есть ли в unique num?
-						_, ok = unique[num]
-						if !ok {
-							// вставка num в unique
-							unique[num] = struct{}{}
-							// запись num в канал
-							out <- num
-						}
-					}
-				}
-				// если записали все числа
-				if len(unique) == limits {
-					// логируем сигнал отмены контекста
-					fmt.Println("context cancel signal")
-					cancel()
-					// почистим каналы producer-ов, чтобы они заметили сигнал отмены
-					for _, ch := range chans {
-						// слушаем текущий канал ch
-						_ = <-ch
-					}
-					// producer-ы завершат свою работу
-					producersWorks = false
+		// пробегаемся по каналам
+		for _, ch := range chans {
+			// слушаем текущий канал ch
+			num, ok := <-ch
+			// если канал открыт
+			if ok {
+				// значит producer-ы всё ещё работают
+				producersWorks = true
+				// ok - есть ли в unique num?
+				_, ok = unique[num]
+				if !ok {
+					// вставка num в unique
+					unique[num] = struct{}{}
+					// запись num в канал
+					out <- num
 				}
 			}
+		}
+		// если записали все числа
+		if len(unique) == limits {
+			// логируем сигнал отмены контекста
+			fmt.Println("context cancel signal")
+			cancel()
+			// почистим каналы producer-ов, чтобы они заметили сигнал отмены
+			for _, ch := range chans {
+				// слушаем текущий канал ch
+				_ = <-ch
+			}
+			// producer-ы завершат свою работу
+			producersWorks = false
 		}
 		// если producer-ы завершили свою работу
 		if !producersWorks {
