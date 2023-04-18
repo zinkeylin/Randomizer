@@ -59,7 +59,6 @@ func consumer(cancel context.CancelFunc, limits int, chans []chan int, out chan 
 					unique[num] = struct{}{}
 					// запись num в канал
 					out <- num
-					println(num)
 				}
 			}
 		}
