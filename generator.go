@@ -1,11 +1,12 @@
 // UniqueNumbersGenerator.go -- генерирует limits чисел (каждое принадлежит интервалу [0, limits)) с помощью
 // threads горутин
-package generator
+package main
 
 import (
 	"context"
 	"fmt"
 	"math/rand"
+	"runtime"
 	"sync"
 	"time"
 )
@@ -37,7 +38,7 @@ func producer(ctx context.Context, n, id int, ch chan<- int) {
 }
 
 // слушает каналы из chans, записываем limits уникальных чисел в out
-func consumer(cancel context.CancelFunc, limits int, chans []chan int, out chan int) {
+func consumer(limits int, chans []chan int, out chan int) {
 	// отображение: int -> struct{}
 	// позволяет использовать его как множество
 	unique := make(map[int]struct{})
@@ -62,19 +63,6 @@ func consumer(cancel context.CancelFunc, limits int, chans []chan int, out chan 
 				}
 			}
 		}
-		// если записали все числа
-		if len(unique) == limits {
-			// логируем сигнал отмены контекста
-			fmt.Println("context cancel signal")
-			cancel()
-			// почистим каналы producer-ов, чтобы они заметили сигнал отмены
-			for _, ch := range chans {
-				// слушаем текущий канал ch
-				_ = <-ch
-			}
-			// producer-ы завершат свою работу
-			producersWorks = false
-		}
 		// если producer-ы завершили свою работу
 		if !producersWorks {
 			// логируем завершение работы consumer-а
@@ -92,10 +80,7 @@ func consumer(cancel context.CancelFunc, limits int, chans []chan int, out chan 
 func Handler(mainCtx context.Context, limits, threads int, out chan int) {
 	// контекст для завершения producer-ов
 	ctx, cancel := context.WithCancel(context.Background())
-	// WaitGroup, отвечающая за выполнение горутин
-	var wg sync.WaitGroup
-	// будет выполнено threads producer-ов и один consumer
-	wg.Add(threads + 1)
+	defer cancel()
 	// запоминаем каналы, передаваемые producer-ам
 	chans := []chan int{}
 	// запуск threads producer-ов
@@ -105,19 +90,24 @@ func Handler(mainCtx context.Context, limits, threads int, out chan int) {
 		// кладём его в chans
 		chans = append(chans, curr)
 		// запуск producer-а, с передачей id для логирования
-		go func(i int) {
-			// кладём в defer stack выполнение текущего producer-а
-			defer wg.Done()
-			producer(ctx, limits, i, curr)
-		}(i)
+		go producer(ctx, limits, i, curr)
+	}
+	// канал для чисел от consumer-а
+	cnsmrCh := make(chan int)
+	// призрак, для завершения consumer
+	ghost := func() {
+		for {
+			_, ok := <-cnsmrCh
+			if !ok {
+				fmt.Println("[Handler] exit")
+				return
+			}
+		}
 	}
 	// запуск consumer-а
-	consumerWorks := true
-	go func() {
-		defer wg.Done()
-		consumer(cancel, limits, chans, out)
-		consumerWorks = false
-	}()
+	go consumer(limits, chans, cnsmrCh)
+	// счётчик отправленных чисел
+	cnt := 0
 	// запускаем прослушку аварийного контекста
 	for {
 		select {
@@ -125,21 +115,47 @@ func Handler(mainCtx context.Context, limits, threads int, out chan int) {
 			{
 				// логируем сигнал отмены контекста
 				fmt.Println("mainContext cancel signal")
-				cancel()
-				// ожидаем завершения работы consumer-а
-				for consumerWorks {
-					_ = <-out
-				}
-				fmt.Print("[Handler] exit")
+				go ghost()
 				return
 			}
 		default:
 			{
-				if !consumerWorks {
-					fmt.Print("[Handler] exit")
+				// если ещё не отправил limits чисел
+				if cnt < limits {
+					out <- <-cnsmrCh
+					cnt++
+				} else {
+					go ghost()
 					return
 				}
 			}
 		}
 	}
+}
+
+func main() {
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			time.Sleep(time.Second)
+			fmt.Println(runtime.NumGoroutine())
+		}
+	}()
+	ctx, cancel := context.WithCancel(context.Background())
+	limits, threads := 500, 1
+	out := make(chan int)
+	go Handler(ctx, limits, threads, out)
+	go func() {
+		for i := 0; i < limits; i++ {
+			if i > limits/2 {
+				cancel()
+				<-out
+				return
+			}
+			<-out
+		}
+	}()
+	wg.Wait()
 }
