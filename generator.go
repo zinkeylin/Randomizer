@@ -1,13 +1,11 @@
 // UniqueNumbersGenerator.go -- генерирует limits чисел (каждое принадлежит интервалу [0, limits)) с помощью
 // threads горутин
-package main
+package generator
 
 import (
 	"context"
 	"fmt"
 	"math/rand"
-	"runtime"
-	"sync"
 	"time"
 )
 
@@ -133,7 +131,7 @@ func Handler(mainCtx context.Context, limits, threads int, out chan int) {
 	}
 }
 
-func main() {
+/*func main() {
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -159,3 +157,4 @@ func main() {
 	}()
 	wg.Wait()
 }
+*/
