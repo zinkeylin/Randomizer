@@ -112,25 +112,30 @@ func Handler(mainCtx context.Context, limits, threads int, out chan int) {
         }(i)
     }
 	// запуск consumer-а
+	consumerWorks := true
     go func() {
         defer wg.Done()
         consumer(cancel, limits, chans, out)
+		consumerWorks = false
     }()
 	// запускаем прослушку аварийного контекста
-	go func() {
-		for {
-			select {
-				case <-mainCtx.Done(): {
-					// логируем сигнал отмены контекста
-					fmt.Println("mainContext cancel signal")
-					cancel()
+	for {
+		select {
+			case <-mainCtx.Done(): {
+				// логируем сигнал отмены контекста
+				fmt.Println("mainContext cancel signal")
+				cancel()
+				fmt.Println("[Handler] exit")
+				return
+			}
+			default:{
+				if !consumerWorks {
+					fmt.Print("[Handler] exit")
 					return
 				}
 			}
 		}
-	}()
-	// ожидаем завершения задач
-    wg.Wait()
-    fmt.Println("[Handler] exit")
+	}
+	
 }
 
